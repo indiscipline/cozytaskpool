@@ -20,7 +20,7 @@ import std/[tasks], threading/channels
 
 var
   data = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61]
-  pool: EasyTaskPool = newTaskPool()
+  pool: CozyTaskPool = newTaskPool()
 
 proc log(inputData: int) =
   echo "Received some message about ", inputData

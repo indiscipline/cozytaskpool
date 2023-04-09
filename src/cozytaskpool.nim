@@ -6,7 +6,7 @@ when not defined(gcArc) and not defined(gcOrc) and not defined(nimdoc):
 type
   RunnerArgs = tuple[tasks: ptr Chan[Task], results: ptr Chan[Task]]
   ConsumerArgs = tuple[results: ptr Chan[Task], nthreads: Positive]
-  EasyTaskPool* = object
+  CozyTaskPool* = object
     nthreads: Positive
     taskThreads: seq[Thread[RunnerArgs]]
     consumerThread: Thread[ConsumerArgs]
@@ -32,13 +32,13 @@ proc consumer(args: ConsumerArgs) {.thread.} =
     try: t.invoke()
     except StopFlag: dec(activethreads)
 
-func resultsAddr*(pool: EasyTaskPool): ptr Chan[Task] {.inline.} =
+func resultsAddr*(pool: CozyTaskPool): ptr Chan[Task] {.inline.} =
   pool.results.addr
 
-proc sendTask*(pool: var EasyTaskPool; task: sink Task) {.inline.} =
+proc sendTask*(pool: var CozyTaskPool; task: sink Task) {.inline.} =
   pool.tasks.send(isolate(task))
 
-proc newTaskPool*(nthreads: Positive = countProcessors()): EasyTaskPool =
+proc newTaskPool*(nthreads: Positive = countProcessors()): CozyTaskPool =
   result.nthreads = nthreads
   result.taskThreads = newSeq[Thread[RunnerArgs]](nthreads)
   result.tasks = newChan[Task]()
@@ -48,7 +48,7 @@ proc newTaskPool*(nthreads: Positive = countProcessors()): EasyTaskPool =
     createThread(result.taskThreads[ti], runner, (result.tasks.addr, result.results.addr))
   result
 
-proc stopPool*(pool: var EasyTaskPool) =
+proc stopPool*(pool: var CozyTaskPool) =
   for _ in pool.taskThreads: pool.tasks.send(toTask(stop()))
   joinThreads(pool.taskThreads)
   joinThread(pool.consumerThread)
@@ -64,7 +64,7 @@ when isMainModule:
 
   suite "Cozy Task Pool test suite":
     setup:
-      var pool: EasyTaskPool = newTaskPool()
+      var pool: CozyTaskPool = newTaskPool()
 
     test "Test completion":
       proc log(inputData: int) =
