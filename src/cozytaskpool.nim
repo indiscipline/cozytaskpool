@@ -1,4 +1,6 @@
-import std/[tasks, osproc], threading/channels
+import std/[tasks, osproc, macros, options], threading/channels
+
+export tasks
 
 when not defined(gcArc) and not defined(gcOrc) and not defined(nimdoc):
   {.error: "This package requires --mm:arc or --mm:orc".}
@@ -9,10 +11,13 @@ type
   CozyTaskPool* = object
     nthreads: Positive
     taskThreads: seq[Thread[RunnerArgs]]
-    consumerThread: Thread[ConsumerArgs]
+    consumerThread: Thread[ConsumerArgs] ## |
+    ## Can be nil, if the pool was created with `createConsumer = false`
     tasks: Chan[Task]
-    results: Chan[Task]
+    results: Option[Chan[Task]]
   StopFlag = object of CatchableError
+
+proc `=copy`(dest: var CozyTaskPool; source: CozyTaskPool) {.error.}
 
 proc stop() = raise newException(StopFlag, "")
 
@@ -22,7 +27,8 @@ proc runner(args: RunnerArgs) {.thread.} =
     args.tasks[].recv(t)
     try: t.invoke()
     except StopFlag: break
-  args.results[].send(toTask(stop())) # notify consumer thread finished
+  if not args.results.isNil():
+    args.results[].send(toTask(stop())) # notify consumer thread finished
 
 proc consumer(args: ConsumerArgs) {.thread.} =
   var activethreads: Natural = args.nthreads
@@ -32,34 +38,54 @@ proc consumer(args: ConsumerArgs) {.thread.} =
     try: t.invoke()
     except StopFlag: dec(activethreads)
 
-func resultsAddr*(pool: CozyTaskPool): ptr Chan[Task] {.inline.} =
-  pool.results.addr
+func resultsAddr*(pool: CozyTaskPool): ptr Chan[Task] {.inline raises:[UnpackDefect].} =
+  ## Assumes the pool was created with the Consumer thread.
+  ## If not, will raise an UnpackDefect exception.
+  assert pool.results.isSome()
+  pool.results.get().unsafeAddr
+
+template consume*(results: ptr Chan[Task]; consumer: typed{nkCall}) =
+  ## Helper template to wrap a call in a `tasks.toTask` macro
+  results[].send(toTask(consumer))
 
 proc sendTask*(pool: var CozyTaskPool; task: sink Task) {.inline.} =
+  ## Send a task to the pool.
+  ## For procedure calls, use with `tasks.toTask` macro:
+  ## `pool.sendTask(toTask(foo(bar)))`
   pool.tasks.send(isolate(task))
 
-proc newTaskPool*(nthreads: Positive = countProcessors()): CozyTaskPool =
+template sendTask*(pool: var CozyTaskPool; worker: typed{nkCall}) =
+  ## Helper template to wrap a call in a `tasks.toTask` macro
+  ## `pool.sendTask(foo(bar))`
+  pool.sendTask(toTask(worker))
+
+proc newTaskPool*(nthreads: Positive = countProcessors(); createConsumer: bool = true): CozyTaskPool =
+  ## Creates the pool and launches its threads, awaiting tasks to execute.
   result.nthreads = nthreads
   result.taskThreads = newSeq[Thread[RunnerArgs]](nthreads)
   result.tasks = newChan[Task]()
-  result.results = newChan[Task]()
-  createThread(result.consumerThread, consumer, (result.results.addr, nthreads))
+  if createConsumer:
+    result.results = some(newChan[Task]())
+    createThread(result.consumerThread, consumer, (result.results.get().addr, nthreads))
+  else:
+    result.results = none(Chan[Task])
   for ti in 0..high(result.taskThreads):
-    createThread(result.taskThreads[ti], runner, (result.tasks.addr, result.results.addr))
+    createThread(result.taskThreads[ti], runner, (result.tasks.addr, result.results.get().addr))
   result
 
 proc stopPool*(pool: var CozyTaskPool) =
+  ## Sends the stopping message to the worker threads and blocks till completion
   for _ in pool.taskThreads: pool.tasks.send(toTask(stop()))
   joinThreads(pool.taskThreads)
-  joinThread(pool.consumerThread)
-
+  if pool.results.isSome():
+    joinThread(pool.consumerThread)
 
 when isMainModule:
-  import std/[tasks, os, unittest], threading/channels
+  import std/[os, unittest]
 
   var
     data = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61]
-    checkset: set[byte] = {1, 2, 4, 6, 10, 12, 16, 18, 22, 28, 30, 36, 40, 42, 46, 52, 58, 60}
+    checkset: set[byte] = {1.byte, 2, 4, 6, 10, 12, 16, 18, 22, 28, 30, 36, 40, 42, 46, 52, 58, 60}
     results: set[byte]
 
   suite "Cozy Task Pool test suite":
