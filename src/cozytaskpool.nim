@@ -6,7 +6,7 @@ when not defined(gcArc) and not defined(gcOrc) and not defined(nimdoc):
   {.error: "This package requires --mm:arc or --mm:orc".}
 
 type
-  RunnerArgs = tuple[tasks: ptr Chan[Task], results: ptr Chan[Task]]
+  RunnerArgs = tuple[tasks: ptr Chan[Task], results: Option[ptr Chan[Task]]]
   ConsumerArgs = tuple[results: ptr Chan[Task], nthreads: Positive]
   CozyTaskPool* = object
     nthreads: Positive
@@ -27,8 +27,8 @@ proc runner(args: RunnerArgs) {.thread.} =
     args.tasks[].recv(t)
     try: t.invoke()
     except StopFlag: break
-  if not args.results.isNil():
-    args.results[].send(toTask(stop())) # notify consumer thread finished
+  if args.results.isSome():
+    (args.results.get())[].send(toTask(stop())) # notify consumer thread finished
 
 proc consumer(args: ConsumerArgs) {.thread.} =
   var activethreads: Natural = args.nthreads
@@ -69,8 +69,9 @@ proc newTaskPool*(nthreads: Positive = countProcessors(); createConsumer: bool =
     createThread(result.consumerThread, consumer, (result.results.get().addr, nthreads))
   else:
     result.results = none(Chan[Task])
+  let resultsOpt = if result.results.isSome(): some(result.results.get().addr) else: none(ptr Chan[Task])
   for ti in 0..high(result.taskThreads):
-    createThread(result.taskThreads[ti], runner, (result.tasks.addr, result.results.get().addr))
+    createThread(result.taskThreads[ti], runner, (result.tasks.addr, resultsOpt))
   result
 
 proc stopPool*(pool: var CozyTaskPool) =
