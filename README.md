@@ -6,10 +6,10 @@ Not very ergonomic, just hides some of the boilerplate of preparing and tearing 
 **Requires** `--threads:on` and (`--mm:arc` or `--mm:orc`)
 
 ## Installation
-Currently not in nimble directory.
+Cozy Task Pool is in nimble directory.
 
 ```
-nimble install https://github.com/indiscipline/cozytaskpool
+nimble install cozytaskpool
 ```
 
 ## Usage
@@ -36,4 +36,4 @@ pool.stopPool()
 ```
 
 ## License
-Cozy Task Pool is licensed under GNU General Public License version 2.0 or later;
+Cozy Task Pool is licensed under GNU General Public License version 2.0 or later.
