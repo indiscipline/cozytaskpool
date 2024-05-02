@@ -2,8 +2,10 @@ import std/[tasks, osproc, macros, options], threading/channels
 
 export tasks
 
-when not defined(gcArc) and not defined(gcOrc) and not defined(nimdoc):
-  {.error: "This package requires --mm:arc or --mm:orc".}
+when not (defined(gcArc) or defined(gcOrc) or defined(gcAtomicArc) or defined(nimdoc)):
+  {.error: "This package requires one of --mm:arc / --mm:atomicArc / --mm:orc compilation flags".}
+when not compileOption("threads"):
+  {.error: "This package requires --threads:on compilation flag".}
 
 type
   RunnerArgs = tuple[tasks: ptr Chan[Task], results: Option[ptr Chan[Task]]]

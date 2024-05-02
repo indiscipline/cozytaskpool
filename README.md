@@ -3,14 +3,18 @@
 Just a repeating pattern of launching `tasks` concurrently in threads with `threading/channels`, extracted into its own micro package.
 Not very ergonomic, just hides some of the boilerplate of preparing and tearing down everything.
 
-**Requires** `--threads:on` and (`--mm:arc` or `--mm:orc`)
+**Requires** `--threads:on` and (`--mm:arc` / `--mm:atomicArc` / `--mm:orc`)
 
 ## Installation
-Cozy Task Pool is in nimble directory.
+Cozy Task Pool is in the nimble directory, use `atlas` or `nimble` to install:
+```
+atlas use cozytaskpool
+```
 
 ```
 nimble install cozytaskpool
 ```
+
 
 ## Usage
 Look at the executable part of the source, which is almost the copy of the following block:
