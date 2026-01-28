@@ -29,12 +29,12 @@ var
 proc log(inputData: int) =
   echo "Received some message about ", inputData
 
-proc work(consumer: ptr Chan[Task]; inputData: int) =
+proc work(consumer: Chan[Task]; inputData: int) =
   doTheWork(inputData)
-  consumer[].send(toTask( log(inputData) ))
+  consumer.send(toTask( log(inputData) ))
 
 for x in data:
-  pool.sendTask(toTask( work(pool.resultsAddr(), x) ))
+  pool.sendTask(toTask( work(pool.resultsChan(), x) ))
 
 pool.stopPool()
 ```

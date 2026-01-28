@@ -1,4 +1,5 @@
-import std/[tasks, osproc, macros, options], threading/channels
+import std/[tasks, osproc, options]
+import pkg/threading/channels
 
 export tasks
 
@@ -8,10 +9,10 @@ when not compileOption("threads"):
   {.error: "This package requires --threads:on compilation flag".}
 
 type
-  RunnerArgs = tuple[tasks: ptr Chan[Task], results: Option[ptr Chan[Task]]]
-  ConsumerArgs = tuple[results: ptr Chan[Task], nthreads: Positive]
+  RunnerArgs = tuple[tasks: Chan[Task], results: Option[Chan[Task]]]
+  ConsumerArgs = tuple[results: Chan[Task], nthreads: Positive]
   CozyTaskPool* = object
-    nthreads: Positive
+    nthreads: Positive = 1
     taskThreads: seq[Thread[RunnerArgs]]
     consumerThread: Thread[ConsumerArgs] ## |
     ## Can be nil, if the pool was created with `createConsumer = false`
@@ -26,29 +27,33 @@ proc stop() = raise newException(StopFlag, "")
 proc runner(args: RunnerArgs) {.thread.} =
   var t: Task
   while true:
-    args.tasks[].recv(t)
+    args.tasks.recv(t)
     try: t.invoke()
     except StopFlag: break
   if args.results.isSome():
-    (args.results.get())[].send(toTask(stop())) # notify consumer thread finished
+    (args.results.unsafeGet()).send(toTask(stop())) # notify consumer thread finished
 
 proc consumer(args: ConsumerArgs) {.thread.} =
   var activethreads: Natural = args.nthreads
   var t: Task
   while activethreads > 0:
-    args.results[].recv(t)
+    args.results.recv(t)
     try: t.invoke()
     except StopFlag: dec(activethreads)
 
-func resultsAddr*(pool: CozyTaskPool): ptr Chan[Task] {.inline raises:[UnpackDefect].} =
+func resultsChan*(pool: CozyTaskPool): Chan[Task] {.inline raises:[UnpackDefect].} =
   ## Assumes the pool was created with the Consumer thread.
   ## If not, will raise an UnpackDefect exception.
   assert pool.results.isSome()
-  pool.results.get().unsafeAddr
+  pool.results.get()
 
-template consume*(results: ptr Chan[Task]; consumer: typed{nkCall}) =
+func resultsAddr*(pool: CozyTaskPool): ptr Chan[Task] {.inline raises:[UnpackDefect] deprecated: "use resultsChan() instead".} =
+  assert pool.results.isSome()
+  pool.results.get().unsafeAddr()
+
+template consume*(results: Chan[Task]; consumer: typed{nkCall}) =
   ## Helper template to wrap a call in a `tasks.toTask` macro
-  results[].send(toTask(consumer))
+  results.send(toTask(consumer))
 
 proc sendTask*(pool: var CozyTaskPool; task: sink Task) {.inline.} =
   ## Send a task to the pool.
@@ -61,20 +66,21 @@ template sendTask*(pool: var CozyTaskPool; worker: typed{nkCall}) =
   ## `pool.sendTask(foo(bar))`
   pool.sendTask(toTask(worker))
 
-proc newTaskPool*(nthreads: Positive = countProcessors(); createConsumer: bool = true): CozyTaskPool =
+proc newTaskPool*(nthreads: Positive = countProcessors(); createConsumer: bool = true): CozyTaskPool {.noinit.} =
   ## Creates the pool and launches its threads, awaiting tasks to execute.
-  result.nthreads = nthreads
-  result.taskThreads = newSeq[Thread[RunnerArgs]](nthreads)
-  result.tasks = newChan[Task]()
+  var pool: CozyTaskPool
+  pool.nthreads = nthreads
+  pool.taskThreads = newSeq[Thread[RunnerArgs]](nthreads)
+  pool.tasks = newChan[Task]()
   if createConsumer:
-    result.results = some(newChan[Task]())
-    createThread(result.consumerThread, consumer, (result.results.get().addr, nthreads))
+    pool.results = some(newChan[Task]())
+    createThread(pool.consumerThread, consumer, (pool.results.get(), nthreads))
   else:
-    result.results = none(Chan[Task])
-  let resultsOpt = if result.results.isSome(): some(result.results.get().addr) else: none(ptr Chan[Task])
-  for ti in 0..high(result.taskThreads):
-    createThread(result.taskThreads[ti], runner, (result.tasks.addr, resultsOpt))
-  result
+    pool.results = none(Chan[Task])
+  let resultsOpt = if pool.results.isSome(): some(pool.results.get()) else: none(Chan[Task])
+  for ti in 0..high(pool.taskThreads):
+    createThread(pool.taskThreads[ti], runner, (pool.tasks, resultsOpt))
+  pool
 
 proc stopPool*(pool: var CozyTaskPool) =
   ## Sends the stopping message to the worker threads and blocks till completion
@@ -100,13 +106,13 @@ when isMainModule:
         results.incl(inputData.byte)
         # echo "Received some message about ", inputData
 
-      proc work(consumer: ptr Chan[Task]; inputData: int) =
+      proc work(consumer: Chan[Task]; inputData: int) =
         sleep(100)
         let r = inputData - 1
-        consumer[].send(toTask( log(r) ))
+        consumer.send(toTask( log(r) ))
 
       for x in data:
-        pool.sendTask(toTask( work(pool.resultsAddr(), x) ))
+        pool.sendTask(toTask( work(pool.resultsChan(), x) ))
 
       pool.stopPool()
       check results == checkset
