@@ -1,5 +1,5 @@
 packageName   = "cozytaskpool"
-version       = "0.1.2"
+version       = "0.1.3"
 author        = "Kirill I"
 description   = "Cozy Task pool"
 license       = "GPL-2.0-or-later"

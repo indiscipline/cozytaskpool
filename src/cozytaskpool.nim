@@ -41,13 +41,13 @@ proc consumer(args: ConsumerArgs) {.thread.} =
     try: t.invoke()
     except StopFlag: dec(activethreads)
 
-func resultsChan*(pool: CozyTaskPool): Chan[Task] {.inline raises:[UnpackDefect].} =
+func resultsChan*(pool: CozyTaskPool): Chan[Task] {.inline.} =
   ## Assumes the pool was created with the Consumer thread.
   ## If not, will raise an UnpackDefect exception.
   assert pool.results.isSome()
   pool.results.get()
 
-func resultsAddr*(pool: CozyTaskPool): ptr Chan[Task] {.inline raises:[UnpackDefect] deprecated: "use resultsChan() instead".} =
+func resultsAddr*(pool: CozyTaskPool): ptr Chan[Task] {.inline deprecated: "use resultsChan() instead".} =
   assert pool.results.isSome()
   pool.results.get().unsafeAddr()
 
